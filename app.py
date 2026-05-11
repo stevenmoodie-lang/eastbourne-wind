@@ -55,23 +55,24 @@ def fetch_open_meteo():
     
     return pd.merge(df_ecmwf, df_gfs, on='time')
 
-def fetch_niwa(api_key):
-    """Fetches NIWA data. Pretends km/h = knots as requested."""
-    headers = {"x-api-key": api_key}
-    # Note: If this endpoint differs in your portal, update the URL.
+def fetch_niwa():
+    """Uses the public Azure endpoint found by Replit (No Key)."""
+    # Updated URL structure for the public grid API
+    url = f"https://weather-api-azure.niwa.co.nz/api/grid/combined?lat={LAT}&long={LON}"
+    
     try:
-        r = requests.get(NIWA_URL, headers=headers).json()
-        # Parsing logic depends on NIWA's exact JSON structure
-        # Assuming a common structure: list of values with valid_at
+        r = requests.get(url).json()
         data = []
+        # The public API often returns a list under 'values' or 'data'
+        # We'll adapt to the 'values' structure common in NIWA's Azure API
         for item in r.get('values', []):
             data.append({
                 'time': pd.to_datetime(item['valid_at']).tz_convert(TIMEZONE).tz_localize(None),
-                'niwa_speed': item['wind_speed'] # Pretending km/h is knots
+                'niwa_speed': item['wind_speed'] # Pretending km/h is knots per your request
             })
         return pd.DataFrame(data)
-    except:
-        st.error("Failed to fetch NIWA data. Check API Key or Endpoint.")
+    except Exception as e:
+        st.error(f"Public NIWA API failed: {e}")
         return pd.DataFrame()
 
 # --- PROCESSING ---
