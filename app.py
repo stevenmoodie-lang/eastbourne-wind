@@ -44,27 +44,37 @@ def fetch_open_meteo():
     return pd.merge(df_ec, df_gfs, on='time')
 
 def fetch_niwa_public():
-    # Using the public "backdoor" endpoint found by Replit Agent
+    # Using the public "backdoor" endpoint
     url = f"https://weather-api-azure.niwa.co.nz/api/grid/combined?lat={LAT}&long={LON}"
+    
+    # NEW: Mimic a real browser to avoid the 'Line 1 Column 1' error
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
     try:
-        r = requests.get(url).json()
-        # The public API returns a 'data' object with 'wind_speed' arrays
-        # or a 'values' list. We'll attempt the most common 'values' loop first.
+        response = requests.get(url, headers=headers)
+        r = response.json()
+        
         data = []
+        # Try different possible NIWA keys
         source_data = r.get('values', r.get('data', []))
         
+        if not source_data:
+            return pd.DataFrame()
+
         for item in source_data:
-            # Handle both common NIWA JSON formats
             time_val = item.get('valid_at', item.get('time'))
             speed_val = item.get('wind_speed', item.get('speed', 0))
-            
-            data.append({
-                'time': pd.to_datetime(time_val).tz_convert(TIMEZONE).tz_localize(None),
-                'niwa_speed': speed_val # Pretend km/h is Knots
-            })
+            if time_val:
+                data.append({
+                    'time': pd.to_datetime(time_val).tz_convert(TIMEZONE).tz_localize(None),
+                    'niwa_speed': speed_val
+                })
         return pd.DataFrame(data)
     except Exception as e:
-        st.error(f"NIWA Fetch Error: {e}")
+        # This will now show the error without crashing the whole app
+        st.sidebar.error(f"NIWA Fetch Error: {e}")
         return pd.DataFrame()
 
 # --- PROCESSING ---
@@ -100,18 +110,27 @@ with st.spinner("Fetching data..."):
     df_niwa = fetch_niwa_public()
     
     if df_niwa.empty:
-        st.warning("Could not load NIWA data. Showing Global Models only.")
-        # Fallback to just OM if NIWA fails
-        df_om['niwa_speed'] = df_om['ecmwf_speed'] 
+        st.sidebar.warning("NIWA unavailable. Using Global Models (ECMWF/GFS).")
+        df_om['niwa_speed'] = df_om['ecmwf_speed'] # Fallback
         df = df_om
     else:
         df = pd.merge(df_om, df_niwa, on='time', how='inner')
 
     df = apply_logic(df)
 
+# SAFETY GATE: Check if df is empty before showing UI
+if df.empty:
+    st.error("No weather data available at the moment. Please try again later.")
+    st.stop()
+
 # Toggle for night
 show_night = st.sidebar.toggle("Show Night Time Data", value=False)
 df_display = df if show_night else df[df['is_night'] == False]
+
+# Check again after filtering night data
+if df_display.empty:
+    st.info("No daytime data available for the next 48h (Check 'Show Night' in sidebar).")
+    st.stop()
 
 # Summary Tiles
 curr = df_display.iloc[0]
